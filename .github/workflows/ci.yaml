@@ -20,7 +20,7 @@ jobs:
     - name: Install required packages
       run: |
         sudo apt update
-        sudo apt install -y unzip wget chroot
+        sudo apt install -y unzip wget 
 
     - name: Download and unzip base image
       run: |

@@ -1,0 +1,79 @@
+name: Build Modified SBC Image
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  release:
+    types: [created]
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    name: Modify and Repack SBC Image
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install required packages
+      run: |
+        sudo apt update
+        sudo apt install -y unzip wget chroot
+
+    - name: Download and unzip base image
+      run: |
+        wget -O base_image.zip "https://thundercomm.s3.ap-northeast-1.amazonaws.com/uploads/web/rubik-pi-3/20250331/FlatBuild_RUBIKPi-3_xx.xx_Debian13.R.debug.ES.r000001.zip"
+        unzip base_image.zip -d extracted_image
+        ls -lh extracted_image
+
+    - name: Mount and modify image using chroot
+      run: |
+        ROOTFS=$(find extracted_image -type d -name 'rootfs' | head -n1)
+        echo "Detected rootfs at $ROOTFS"
+
+        sudo mount --bind /dev "$ROOTFS/dev"
+        sudo mount --bind /proc "$ROOTFS/proc"
+        sudo mount --bind /sys "$ROOTFS/sys"
+
+        sudo chroot "$ROOTFS" /bin/bash -c "
+          echo 'deb http://deb.debian.org/debian/ bookworm main contrib non-free' > /etc/apt/sources.list &&
+          echo 'deb-src http://deb.debian.org/debian/ bookworm main contrib non-free' >> /etc/apt/sources.list &&
+          echo 'deb http://security.debian.org/debian-security bookworm-security main contrib non-free' >> /etc/apt/sources.list &&
+          echo 'deb-src http://security.debian.org/debian-security bookworm-security main contrib non-free' >> /etc/apt/sources.list &&
+          echo 'deb http://deb.debian.org/debian/ bookworm-updates main contrib non-free' >> /etc/apt/sources.list &&
+          echo 'deb-src http://deb.debian.org/debian/ bookworm-updates main contrib non-free' >> /etc/apt/sources.list &&
+          apt update &&
+          wget https://git.io/JJrEP -O /tmp/install.sh &&
+          chmod +x /tmp/install.sh &&
+          /tmp/install.sh
+        "
+
+        sudo umount "$ROOTFS/dev"
+        sudo umount "$ROOTFS/proc"
+        sudo umount "$ROOTFS/sys"
+
+    - name: Clean up rootfs
+      run: |
+        # Add any additional cleanup steps here
+        sudo rm -rf $(find extracted_image -type d -name 'rootfs')/tmp/*
+
+    - name: Zip modified image
+      run: |
+        MODIFIED_ZIP=modified_image.zip
+        zip -r "$MODIFIED_ZIP" extracted_image
+        echo "Zipped image to $MODIFIED_ZIP"
+
+    - name: Upload artifact (on push)
+      if: github.event_name == 'push'
+      uses: actions/upload-artifact@v4
+      with:
+        name: modified-sbc-image
+        path: modified_image.zip
+
+    - name: Upload release asset (on tag)
+      if: github.event_name == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: modified_image.zip
